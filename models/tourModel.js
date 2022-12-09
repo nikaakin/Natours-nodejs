@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const slugify = require('slugify');
+// const User = require('./userModel');
 
 const tourSchema = mongoose.Schema(
   {
@@ -32,7 +33,8 @@ const tourSchema = mongoose.Schema(
       type: Number,
       default: 4.5,
       min: [1, 'rating cant be less then 1.0'],
-      max: [5, 'rating cant be more then 5.0']
+      max: [5, 'rating cant be more then 5.0'],
+      set: val => Math.round(val * 10) / 10
     },
     ratingsQuantity: {
       type: Number,
@@ -74,19 +76,70 @@ const tourSchema = mongoose.Schema(
     secretTour: {
       type: Boolean,
       default: false
-    }
+    },
+    startLocation: {
+      // GeoJSON
+      type: {
+        type: String,
+        default: 'Point',
+        enum: ['Point']
+      },
+      coordinates: [Number],
+      description: String,
+      address: String
+    },
+    locations: [
+      {
+        type: {
+          type: String,
+          default: 'Point',
+          enum: ['Point']
+        },
+        coordinates: [Number],
+        description: String,
+        address: String,
+        day: Number
+      }
+    ],
+    guides: [
+      {
+        type: mongoose.Schema.ObjectId,
+        ref: 'User'
+      }
+    ]
   },
   { toJSON: { virtuals: true }, toObject: { virtuals: true } }
 );
 
+tourSchema.index({ price: 1, ratingsAverage: 1 });
+tourSchema.index({ slug: 1 });
+tourSchema.index({ locations: '2dsphere' });
+
 tourSchema.virtual('weeks').get(function() {
   return Math.ceil(this.duration / 7);
+});
+
+// need population for this
+tourSchema.virtual('reviews', {
+  ref: 'Review',
+  foreignField: 'tour',
+  localField: '_id'
 });
 
 tourSchema.pre('save', function(next) {
   this.slug = slugify(this.name);
   next();
 });
+
+// embeed users ('guides') into tours (not best practice)
+// tourSchema.pre('save', async function(next) {
+//   console.log(this);
+//   const guidesPromise = this.guides.map(async id => await User.findById(id));
+
+//   this.guides = await Promise.all(guidesPromise);
+//   next();
+// });
+
 // tourSchema.post('save', function(doc, next) {
 //   console.log(doc);
 //   next();
@@ -97,14 +150,20 @@ tourSchema.pre(/^find/, function(next) {
   this.start = Date.now();
   next();
 });
+
+tourSchema.pre(/^find/, function(next) {
+  this.populate({ path: 'guides', select: '-__v -passwordChangedAt' });
+  next();
+});
+
 tourSchema.post(/^find/, function(docs, next) {
   console.log(`took ${Date.now() - this.start}`);
   next();
 });
 
-tourSchema.pre('aggregate', function(next) {
-  this.pipeline().unshift({ $match: { secretTour: { $ne: true } } });
-  next();
-});
+// tourSchema.pre('aggregate', function(next) {
+//   this.pipeline().unshift({ $match: { secretTour: { $ne: true } } });
+//   next();
+// });
 
 module.exports = mongoose.model('Tour', tourSchema);

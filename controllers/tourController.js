@@ -1,6 +1,6 @@
 const Tour = require('../models/tourModel.js');
-const APIFeatures = require('../utils/APIFeatures');
 const catchAsync = require('../utils/catchAsync');
+const factory = require('./handlerFactory');
 const AppError = require('../utils/AppError');
 
 exports.aliasTopTours = (req, res, next) => {
@@ -10,79 +10,13 @@ exports.aliasTopTours = (req, res, next) => {
   next();
 };
 
-exports.getAllTours = catchAsync(async (req, res, next) => {
-  const tours = await new APIFeatures(Tour.find(), req.query)
-    .filter()
-    .sort()
-    .limitFields()
-    .paginate().query;
-
-  // SENDING RESPONSE
-  res.status(200).json({
-    status: 'success',
-    results: tours.length,
-    data: {
-      tours
-    }
-  });
+exports.getAllTours = factory.getMany(Tour);
+exports.getTour = factory.getOne(Tour, {
+  path: 'reviews'
 });
-
-exports.getTour = catchAsync(async (req, res, next) => {
-  const tour = await Tour.findById(req.params.id);
-
-  if (!tour) {
-    return next(new AppError('tour not found', 404));
-  }
-
-  res.status(200).json({
-    status: 'success',
-    data: {
-      tour
-    }
-  });
-});
-
-exports.createTour = catchAsync(async (req, res, next) => {
-  const newTour = await Tour.create(req.body);
-
-  res.status(201).json({
-    status: 'success',
-    data: {
-      tour: newTour
-    }
-  });
-});
-
-exports.updateTour = catchAsync(async (req, res, next) => {
-  const updatedTour = await Tour.findByIdAndUpdate(req.params.id, req.body, {
-    new: true,
-    runValidators: true
-  });
-
-  if (!updatedTour) {
-    return next(new AppError('tour not found', 404));
-  }
-
-  res.status(200).json({
-    status: 'success',
-    data: {
-      tour: updatedTour
-    }
-  });
-});
-
-exports.deleteTour = catchAsync(async (req, res, next) => {
-  const tour = await Tour.findByIdAndDelete(req.params.id);
-
-  if (!tour) {
-    return next(new AppError('tour not found', 404));
-  }
-
-  res.status(204).json({
-    status: 'success',
-    data: null
-  });
-});
+exports.createTour = factory.createOne(Tour);
+exports.updateTour = factory.updateOne(Tour);
+exports.deleteTour = factory.deleteOne(Tour);
 
 exports.getTourStats = catchAsync(async (req, res, next) => {
   const stats = await Tour.aggregate([
@@ -128,7 +62,7 @@ exports.getMonthlyPlan = catchAsync(async (req, res, next) => {
       $group: {
         _id: { $month: '$startDates' },
         numberOfTours: { $sum: 1 },
-        tours: { $push: '$name' }
+        tours: { $push: { name: '$name', difficulty: '$difficulty' } }
       }
     },
     {
@@ -149,3 +83,91 @@ exports.getMonthlyPlan = catchAsync(async (req, res, next) => {
     }
   });
 });
+
+exports.getToursWithin = catchAsync(async function(req, res, next) {
+  const { distance, unit, latlng } = req.params;
+  const [lat, lng] = latlng.split(',');
+  const radius = unit === 'mi' ? distance / 3963.2 : distance / 6378.1;
+
+  if (!lat || !lng) {
+    next(
+      new AppError(
+        'please provide lagitude and longitude in following format - lat,lng ',
+        400
+      )
+    );
+  }
+
+  const tours = await Tour.find({
+    startLocation: {
+      $geoWithin: {
+        $centerSphere: [[lng, lat], radius]
+        // its available only with $near not $geoWithin
+        // $maxDistance: distance,
+        // $minDistance: 0
+      }
+    }
+  });
+
+  res.status(200).json({
+    status: 'success ',
+    results: tours.length,
+    data: {
+      data: tours
+    }
+  });
+});
+
+exports.getDistances = catchAsync(async function(req, res, next) {
+  const { latlng } = req.params;
+  const [lat, lng] = latlng.split(',');
+
+  if (!lat || !lng) {
+    next(
+      new AppError(
+        'please provide lagitude and longitude in following format - lat,lng ',
+        400
+      )
+    );
+  }
+
+  const distances = await Tour.aggregate([
+    {
+      $geoNear: {
+        near: { type: 'Point', coordinates: [+lng, +lat] },
+        distanceField: 'distance',
+        distanceMultiplier: 0.001
+      }
+    },
+    {
+      $project: {
+        distance: 1,
+        name: 1
+      }
+    },
+    {
+      $limit: 5
+    }
+  ]);
+
+  res.status(200).json({
+    status: 'success ',
+    results: distances.length,
+    data: {
+      data: distances
+    }
+  });
+});
+
+// db.places.aggregate([
+//   {
+//     $geoNear: {
+//       near: { type: 'Point', coordinates: [-73.99279, 40.719296] },
+//       distanceField: 'dist.calculated',
+//       maxDistance: 2,
+//       query: { category: 'Parks' },
+//       includeLocs: 'dist.location',
+//       spherical: true
+//     }
+//   }
+// ]);
