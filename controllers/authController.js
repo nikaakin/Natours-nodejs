@@ -4,7 +4,7 @@ const { promisify } = require('util');
 const User = require('../models/userModel');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/AppError');
-const sendEmailes = require('../utils/email');
+const Email = require('../utils/email');
 
 const createToken = id =>
   jwt.sign({ id }, process.env.JWT_SECRET, {
@@ -46,6 +46,11 @@ exports.signup = catchAsync(async (req, res, next) => {
     role
   });
 
+  await new Email(
+    { email, name },
+    `${req.protocol}://${req.get('host')}/me`
+  ).sendWelcome();
+
   createSendToken(res, newUser, 201);
 });
 
@@ -71,15 +76,21 @@ exports.signin = catchAsync(async (req, res, next) => {
 
 exports.protect = catchAsync(async (req, res, next) => {
   //
+  let token;
   if (
-    !req.headers.authorization ||
-    !req.headers.authorization.startsWith('Bearer')
+    req.headers.authorization &&
+    req.headers.authorization.startsWith('Bearer')
   ) {
-    next(
+    token = req.headers.authorization.split(' ')[1];
+  } else if (req.cookies.jwt) {
+    token = req.cookies.jwt;
+  }
+
+  if (!token) {
+    return next(
       new AppError('You are not logged in. Please login to get access ', 401)
     );
   }
-  const token = req.headers.authorization.split(' ')[1];
 
   //
   const decoded = await promisify(jwt.verify)(token, process.env.JWT_SECRET);
@@ -88,18 +99,65 @@ exports.protect = catchAsync(async (req, res, next) => {
   const curUser = await User.findById(decoded.id);
 
   if (!curUser) {
-    next(new AppError('This user no longer exists.', 401));
+    return next(new AppError('This user no longer exists.', 401));
   }
   // check if user changed password after token was created
   if (curUser.changePasswordAfter(decoded.iat, curUser.passwordChangedAt)) {
-    next(
+    return next(
       new AppError('user recently changed password. Please log in again.', 401)
     );
   }
 
   req.user = curUser;
+  res.locals.user = curUser;
   next();
 });
+
+exports.isLoggedIn = async (req, res, next) => {
+  //
+  try {
+    let token;
+    if (req.cookies.jwt) {
+      token = req.cookies.jwt;
+
+      if (!token) {
+        return next(
+          new AppError(
+            'You are not logged in. Please login to get access ',
+            401
+          )
+        );
+      }
+      //
+      const decoded = await promisify(jwt.verify)(
+        token,
+        process.env.JWT_SECRET
+      );
+
+      // check if user still exists
+      const curUser = await User.findById(decoded.id);
+
+      if (!curUser) {
+        return next(new AppError('This user no longer exists.', 401));
+      }
+      // check if user changed password after token was created
+      if (curUser.changePasswordAfter(decoded.iat, curUser.passwordChangedAt)) {
+        return next(
+          new AppError(
+            'user recently changed password. Please log in again.',
+            401
+          )
+        );
+      }
+      // giving templates user variable
+      res.locals.user = curUser;
+      return next();
+    }
+  } catch (err) {
+    return next();
+  }
+  next();
+};
 
 exports.restrictTo = (...allowedRoles) => {
   return (req, res, next) => {
@@ -124,19 +182,12 @@ exports.forgotPassword = catchAsync(async (req, res, next) => {
   const token = await user.createPasswordResetToken();
   user.save({ validateBeforeSave: false });
 
-  //
-  const resetURL = `${req.protocol}://${req.get(
-    'host'
-  )}/api/v1/users/resetpassword/${token}`;
-
-  const message = `Forgot your password? Submit the request with your new password to ${resetURL}.\nIf you didn't forgot your password, please ignore this email!`;
-
   try {
-    await sendEmailes({
-      email: user.email,
-      subject: 'Your password reset token (valid for 10 minutes)',
-      message
-    });
+    //
+    const resetURL = `${req.protocol}://${req.get(
+      'host'
+    )}/api/v1/users/resetpassword/${token}`;
+    await new Email(user, resetURL).sendPasswordReset();
 
     res.status(200).json({
       status: 'success',
@@ -184,7 +235,7 @@ exports.updatePassword = catchAsync(async (req, res, next) => {
   const user = await User.findById(req.user.id).select('+password');
 
   if (!(await user.comparePasswords(req.body.passwordCurrent, user.password))) {
-    return next(AppError('wrong password', 401));
+    return next(new AppError('wrong password', 401));
   }
 
   user.password = req.body.password;
@@ -193,3 +244,14 @@ exports.updatePassword = catchAsync(async (req, res, next) => {
 
   createSendToken(res, user, 200);
 });
+
+exports.signout = (req, res, next) => {
+  res.cookie('jwt', 'loggedOut', {
+    expires: new Date(Date.now() + 10000),
+    httpOnly: true
+  });
+
+  res.status(200).json({
+    status: 'success'
+  });
+};
