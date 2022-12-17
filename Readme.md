@@ -1,4 +1,4 @@
-# Natours Applicarion:
+# Natours Application:
 
 ## Done with:
 
