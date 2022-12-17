@@ -8,7 +8,7 @@
     "start:dev": "nodemon server.js",
     "start:prod": "NODE_ENV=production nodemon server.js",
     "watch:js": "parcel watch ./public/js/index.js --out-dir ./public/js/ --out-file bundler.js ",
-    "build:js": "parcel build ./public/js/index.js --out-dir ./public/js/ --out-file bundler.js "
+    "build": "parcel build ./public/js/index.js --out-dir ./public/js/ --out-file bundler.js "
   },
   "author": "Nika Akin",
   "license": "ISC",
