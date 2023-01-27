@@ -31,7 +31,7 @@ Logged in person with the role of "user" can buy a tour:
 1. Click Detail button on the tour.
 2. Scroll to the end of the page and click a "BOOK A TOUR" button
 3. Credit-card number : 4242 4242 4242 4242
-4. Expiration-date : any time in future is exceptable
+4. Expiration-date : any time in future is acceptable
 5. Click pay and wait until you are rediracted to ".../my-tours" page, where you'll see all the tours you've bought
 
 To check which tours you have bought already click avatar on header, on personal page left-side bar click "My Bookings"
